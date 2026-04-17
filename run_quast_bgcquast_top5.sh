@@ -2,180 +2,173 @@
 set -u
 set -o pipefail
 
-BASE="/net/projects/halmessa/BGC_project/plant_BGC_paper/run_from_script"
+#########################################
+# Usage
+#########################################
+
+if [[ $# -lt 1 ]]; then
+    echo "Usage:"
+    echo "bash run_quast_bgcquast_top5.sh <triplet_workflow_outdir> [TOP_N]"
+    exit 1
+fi
+
+BASE="$(realpath "$1")"
+TOP_N="${2:-5}"
+
+#########################################
+# Input files inside workflow output dir
+#########################################
+
 TOP_FILE="${BASE}/summary_ranked_hq_bgcrich.tsv"
-TOP_N=5
 
 HYB_DIR="${BASE}/good_hybrid_assembly_based_MAGs_nanosim"
 SHORT_DIR="${BASE}/poor_short_assembly_based_MAGs"
 
-LOGDIR="/net/projects/halmessa/BGC_project/logs_gecco_hybrid"
+#########################################
+# External tools
+#########################################
+
 BGCQUAST_REPO="/net/projects/halmessa/BGC_project/bgc-quast"
 
-mkdir -p "${LOGDIR}" "${BASE}/logs"
+#########################################
+# Prepare
+#########################################
+
+mkdir -p "${BASE}/logs"
 
 source ~/miniforge3/etc/profile.d/conda.sh
+
+#########################################
+# Helper function
+#########################################
 
 has_real_clusters() {
     local f="$1"
     [[ -f "$f" ]] && [[ $(wc -l < "$f") -gt 1 ]]
 }
 
-tail -n +2 "${TOP_FILE}" | head -n "${TOP_N}" | while IFS=$'\t' read -r \
-    OTU TAXID REF HYB SHORT REF_CONTIGS REF_TOTAL REF_N50 HYB_CONTIGS HYB_TOTAL HYB_N50 SHORT_CONTIGS SHORT_TOTAL SHORT_N50 REFHYB HYBSHORT
+#########################################
+# Check required files
+#########################################
+
+if [[ ! -f "${TOP_FILE}" ]]; then
+    echo "ERROR: Cannot find ${TOP_FILE}"
+    exit 1
+fi
+
+#########################################
+# Main loop
+#########################################
+
+tail -n +1 "${TOP_FILE}" | head -n "${TOP_N}" | while IFS=$'\t' read -r \
+OTU TAXID REF HYB SHORT REF_CONTIGS REF_TOTAL REF_N50 HYB_CONTIGS HYB_TOTAL HYB_N50 SHORT_CONTIGS SHORT_TOTAL SHORT_N50 REFHYB HYBSHORT
 do
-    (
-        set -euo pipefail
+(
+set -euo pipefail
 
-        SAFE_OTU="${OTU//./_}"
+SAFE_OTU="${OTU//./_}"
 
-        echo "=================================================="
-        echo "Processing ${OTU}"
-        echo "Reference: ${REF}"
-        echo "Hybrid MAG: ${HYB}"
-        echo "Short MAG: ${SHORT}"
-        echo "=================================================="
+echo "=================================================="
+echo "Processing ${OTU}"
+echo "=================================================="
 
-        REF_OUTDIR="${BASE}/gecco_run_on_${OTU}_ref"
-        HYB_OUTDIR="${BASE}/gecco_run_on_${OTU}_hybrid_MAG"
-        SHORT_OUTDIR="${BASE}/gecco_run_on_${OTU}_short_MAG"
+REF_OUTDIR="${BASE}/gecco_run_on_${OTU}_ref"
+HYB_OUTDIR="${BASE}/gecco_run_on_${OTU}_hybrid_MAG"
+SHORT_OUTDIR="${BASE}/gecco_run_on_${OTU}_short_MAG"
 
-        QUAST_OUT="${BASE}/assembly_to_ref_align_quast_${SAFE_OTU}"
-        BGCQUAST_OUT="${BASE}/bgcquast_${SAFE_OTU}_compare_to_reference"
+QUAST_OUT="${BASE}/assembly_to_ref_align_quast_${SAFE_OTU}"
+BGCQUAST_OUT="${BASE}/bgcquast_${SAFE_OTU}_compare_to_reference"
 
-        HYB_SAFE_FASTA="${HYB_DIR}/hybrid_${SAFE_OTU}.fasta"
-        SHORT_SAFE_FASTA="${SHORT_DIR}/short_${SAFE_OTU}.fasta"
+HYB_SAFE_FASTA="${HYB_DIR}/hybrid_${SAFE_OTU}.fasta"
+SHORT_SAFE_FASTA="${SHORT_DIR}/short_${SAFE_OTU}.fasta"
 
-        HYB_SAFE_CLUSTER="${HYB_OUTDIR}/hybrid_${SAFE_OTU}.clusters.tsv"
-        SHORT_SAFE_CLUSTER="${SHORT_OUTDIR}/short_${SAFE_OTU}.clusters.tsv"
+HYB_SAFE_CLUSTER="${HYB_OUTDIR}/hybrid_${SAFE_OTU}.clusters.tsv"
+SHORT_SAFE_CLUSTER="${SHORT_OUTDIR}/short_${SAFE_OTU}.clusters.tsv"
 
-        REF_BASENAME="$(basename "${REF}" .fasta)"
-        REF_CLUSTER="${REF_OUTDIR}/${REF_BASENAME}.clusters.tsv"
+REF_BASENAME="$(basename "${REF}" .fasta)"
+REF_CLUSTER="${REF_OUTDIR}/${REF_BASENAME}.clusters.tsv"
 
-        mkdir -p "${REF_OUTDIR}" "${HYB_OUTDIR}" "${SHORT_OUTDIR}"
+mkdir -p "${REF_OUTDIR}" "${HYB_OUTDIR}" "${SHORT_OUTDIR}"
 
-        # Prepare sanitized MAG filenames
-        if [[ ! -f "${HYB_SAFE_FASTA}" ]]; then
-            cp "${HYB}" "${HYB_SAFE_FASTA}"
-        fi
+#########################################
+# GECCO
+#########################################
 
-        if [[ ! -f "${SHORT_SAFE_FASTA}" ]]; then
-            cp "${SHORT}" "${SHORT_SAFE_FASTA}"
-        fi
+conda activate gecco_env
 
-        # -----------------------------
-        # 1. GECCO
-        # -----------------------------
-        conda activate gecco_env
+if [[ ! -f "${REF_CLUSTER}" ]]; then
+    gecco run --genome "${REF}" -o "${REF_OUTDIR}"
+fi
 
-        echo "[GECCO] reference ${OTU}"
-        if [[ ! -f "${REF_CLUSTER}" ]]; then
-            gecco run \
-              --genome "${REF}" \
-              -o "${REF_OUTDIR}" \
-              > "${BASE}/logs/${SAFE_OTU}.gecco_ref.stdout.log" \
-              2> "${BASE}/logs/${SAFE_OTU}.gecco_ref.stderr.log"
-        else
-            echo "  Reference GECCO output exists, skipping."
-        fi
+if [[ ! -f "${HYB_SAFE_CLUSTER}" ]]; then
+    gecco run --genome "${HYB_SAFE_FASTA}" -o "${HYB_OUTDIR}" || true
+fi
 
-        echo "[GECCO] hybrid ${OTU}"
-        if [[ ! -f "${HYB_SAFE_CLUSTER}" ]]; then
-            gecco run \
-              --genome "${HYB_SAFE_FASTA}" \
-              -o "${HYB_OUTDIR}" \
-              > "${BASE}/logs/${SAFE_OTU}.gecco_hybrid.stdout.log" \
-              2> "${BASE}/logs/${SAFE_OTU}.gecco_hybrid.stderr.log"
+if [[ ! -f "${SHORT_SAFE_CLUSTER}" ]]; then
+    gecco run --genome "${SHORT_SAFE_FASTA}" -o "${SHORT_OUTDIR}" || true
+fi
 
-            if [[ -f "${HYB_OUTDIR}/${OTU}.clusters.tsv" && ! -f "${HYB_SAFE_CLUSTER}" ]]; then
-                cp "${HYB_OUTDIR}/${OTU}.clusters.tsv" "${HYB_SAFE_CLUSTER}"
-            fi
-        else
-            echo "  Hybrid GECCO output exists, skipping."
-        fi
+conda deactivate
 
-        echo "[GECCO] short ${OTU}"
-        if [[ ! -f "${SHORT_SAFE_CLUSTER}" ]]; then
-            gecco run \
-              --genome "${SHORT_SAFE_FASTA}" \
-              -o "${SHORT_OUTDIR}" \
-              > "${BASE}/logs/${SAFE_OTU}.gecco_short.stdout.log" \
-              2> "${BASE}/logs/${SAFE_OTU}.gecco_short.stderr.log" || true
+#########################################
+# Skip empty BGC outputs
+#########################################
 
-            if [[ -f "${SHORT_OUTDIR}/${OTU}.clusters.tsv" && ! -f "${SHORT_SAFE_CLUSTER}" ]]; then
-                cp "${SHORT_OUTDIR}/${OTU}.clusters.tsv" "${SHORT_SAFE_CLUSTER}"
-            fi
-        else
-            echo "  Short GECCO output exists, skipping."
-        fi
+if ! has_real_clusters "${REF_CLUSTER}"; then
+    echo "[SKIP] ${OTU}: no ref BGCs"
+    exit 0
+fi
 
-        conda deactivate
+if ! has_real_clusters "${HYB_SAFE_CLUSTER}"; then
+    echo "[SKIP] ${OTU}: no hybrid BGCs"
+    exit 0
+fi
 
-        # -----------------------------
-        # Check whether GECCO found BGCs
-        # -----------------------------
-        if ! has_real_clusters "${REF_CLUSTER}"; then
-            echo "[SKIP] ${OTU}: reference has no detectable BGCs" | tee -a "${BASE}/logs/skipped_candidates.log"
-            exit 0
-        fi
+if ! has_real_clusters "${SHORT_SAFE_CLUSTER}"; then
+    echo "[SKIP] ${OTU}: no short BGCs"
+    exit 0
+fi
 
-        if ! has_real_clusters "${HYB_SAFE_CLUSTER}"; then
-            echo "[SKIP] ${OTU}: hybrid MAG has no detectable BGCs" | tee -a "${BASE}/logs/skipped_candidates.log"
-            exit 0
-        fi
+#########################################
+# QUAST
+#########################################
 
-        if ! has_real_clusters "${SHORT_SAFE_CLUSTER}"; then
-            echo "[SKIP] ${OTU}: short MAG has no detectable BGCs" | tee -a "${BASE}/logs/skipped_candidates.log"
-            exit 0
-        fi
+conda activate quast
 
-        # -----------------------------
-        # 2. QUAST
-        # -----------------------------
-        conda activate quast
+if [[ ! -f "${QUAST_OUT}/report.tsv" ]]; then
+    quast.py \
+      "${HYB_SAFE_FASTA}" \
+      "${SHORT_SAFE_FASTA}" \
+      -r "${REF}" \
+      -o "${QUAST_OUT}" \
+      -t 16
+fi
 
-        echo "[QUAST] ${OTU}"
-        if [[ ! -f "${QUAST_OUT}/report.tsv" ]]; then
-            quast.py \
-              "${HYB_SAFE_FASTA}" \
-              "${SHORT_SAFE_FASTA}" \
-              -r "${REF}" \
-              -o "${QUAST_OUT}" \
-              -t 16 \
-              > "${BASE}/logs/${SAFE_OTU}.quast.stdout.log" \
-              2> "${BASE}/logs/${SAFE_OTU}.quast.stderr.log"
-        else
-            echo "  QUAST output exists, skipping."
-        fi
+conda deactivate
 
-        conda deactivate
+#########################################
+# BGC-QUAST
+#########################################
 
-        # -----------------------------
-        # 3. BGC-QUAST
-        # -----------------------------
-        conda activate bgc-quast
+conda activate bgc-quast
 
-        echo "[BGC-QUAST] ${OTU}"
-        if [[ ! -f "${BGCQUAST_OUT}/report.tsv" ]]; then
-            python "${BGCQUAST_REPO}/bgc-quast.py" \
-              "${HYB_SAFE_CLUSTER}" \
-              "${SHORT_SAFE_CLUSTER}" \
-              --mode compare-to-reference \
-              --reference-mining-result "${REF_CLUSTER}" \
-              --quast-output-dir "${QUAST_OUT}" \
-              --output-dir "${BGCQUAST_OUT}" \
-              > "${BASE}/logs/${SAFE_OTU}.bgcquast.stdout.log" \
-              2> "${BASE}/logs/${SAFE_OTU}.bgcquast.stderr.log"
-        else
-            echo "  BGC-QUAST output exists, skipping."
-        fi
+if [[ ! -f "${BGCQUAST_OUT}/report.tsv" ]]; then
+python "${BGCQUAST_REPO}/bgc-quast.py" \
+"${HYB_SAFE_CLUSTER}" \
+"${SHORT_SAFE_CLUSTER}" \
+--mode compare-to-reference \
+--reference-mining-result "${REF_CLUSTER}" \
+--quast-output-dir "${QUAST_OUT}" \
+--output-dir "${BGCQUAST_OUT}"
+fi
 
-        conda deactivate
+conda deactivate
 
-        echo "Done: ${OTU}"
-        echo
-    ) || {
-        echo "[ERROR] ${OTU} failed; continuing to next candidate" | tee -a "${BASE}/logs/failed_candidates.log"
-        continue
-    }
+echo "Done ${OTU}"
+
+) || {
+echo "[FAILED] ${OTU}"
+continue
+}
+
 done
