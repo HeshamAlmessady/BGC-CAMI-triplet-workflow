@@ -50,7 +50,6 @@ and MAG directories such as:
 - `good_hybrid_assembly_based_MAGs_nanosim/`
 - `poor_short_assembly_based_MAGs/`
 
-```
 
 ## Author
 
