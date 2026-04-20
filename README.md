@@ -51,6 +51,74 @@ and MAG directories such as:
 - `poor_short_assembly_based_MAGs/`
 
 
-## Author
+# Triplet Selection Workflow for BGC-QUAST from plant cami2 dataset 
 
-Hesham Almessady
+## Step 1 — get the ground truth hybrid-reads binning file for CAMI2 plant dataset 
+
+```bash
+cp /net/sgi/cami/data/CAMI2/second_challenge_evaluation/binning/genome_binning/plant_associated_dataset/data/ground_truth/rhizosphere_hybrid_pooled_gsa.binning.tar.gz .
+tar -xzvf rhizosphere_hybrid_pooled_gsa.binning.tar.gz
+```
+
+## Step 2 — get the ground truth short-reads binning file for CAMI2 plant dataset 
+
+```bash
+cp /net/sgi/cami/data/CAMI2/second_challenge_evaluation/binning/genome_binning/plant_associated_dataset/data/ground_truth/rhizosphere_short_read_pooled_gsa.binning.tar.gz .
+tar -xzvf rhizosphere_short_read_pooled_gsa.binning.tar.gz
+``` 
+
+## Step 3 — get target taxids for BGCs rich taxa (Actinomycetes, Cyanobacteria, Myxococcota)
+
+```bash
+awk -F'\t' '!/^@/ {print $3}' \
+rhizosphere_hybrid_pooled_gsa.binning | \
+sort -u | \
+taxonkit lineage | \
+taxonkit reformat | \
+grep -Ei 'Actinomycet|Actinobacter|Cyanobacteri|Myxococc' | \
+cut -f1 > target_taxids.txt
+```
+
+## Step 4 — filter the binning file using those taxids
+
+```bash
+awk -F'\t' 'NR==FNR {keep[$1]=1; next} /^@/ || ($3 in keep)' target_taxids.txt \
+rhizosphere_hybrid_pooled_gsa.binning > target_groups.tsv
+```
+
+## Step 5 — get genome mapping file from the simulation directory
+
+```bash
+cp /net/sgi/cami/data/CAMI2/roter_data/lotus_rhizosphere/simulation_short_read/genome_to_id.tsv . 
+```
+
+## Step 6 — get short-reads gold standard assembly fasta file 
+
+```bash
+cp /net/sgi/cami/data/CAMI2/roter_data/lotus_rhizosphere/rhimgCAMI2/assembly/rhimgCAMI2_short_read_pooled_gsa.fasta.gz . 
+gunzip rhimgCAMI2_short_read_pooled_gsa.fasta.gz 
+```
+
+## Step 7 — get hybrid-reads gold standard assembly fasta file 
+
+```bash
+cp /net/benchmarking/fmeyer/cami2/rhizosphere/assembly/rhimgCAMI2_hybrid_nanosim_pooled_gsa.fasta.gz . 
+gunzip rhimgCAMI2_hybrid_nanosim_pooled_gsa.fasta.gz
+``` 
+
+## Step 8 — Run the triplet workflow python script 
+
+```bash
+python triplet_workflow.py \
+  --hyb-binning rhizosphere_hybrid_pooled_gsa.binning  \
+  --short-binning rhizosphere_short_read_pooled_gsa.binning  \
+  --hyb-gsa rhimgCAMI2_hybrid_nanosim_pooled_gsa.fasta  \
+  --short-gsa rhimgCAMI2_short_read_pooled_gsa.fasta  \
+  --genome-map genome_to_id.tsv \
+  --target-groups target_groups.tsv \
+  --target-taxids target_taxids.txt \
+  --outdir path to output directory \
+  --generate-mags \
+  --build-summaries
+```
+
