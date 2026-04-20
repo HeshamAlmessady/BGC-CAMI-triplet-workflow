@@ -51,7 +51,9 @@ and MAG directories such as:
 - `poor_short_assembly_based_MAGs/`
 
 
-# Triplet Selection Workflow for BGC-QUAST from plant cami2 dataset 
+
+
+# Triplet Selection Workflow for BGC-QUAST from CAMI2 plant dataset 
 
 ## Step 1 — get the ground truth hybrid-reads binning file for CAMI2 plant dataset 
 
